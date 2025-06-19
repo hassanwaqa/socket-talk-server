@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+	threads   ThreadParticipant[] // Relations to threads
+  messages  Message[]           // Sent messages
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Thread {
+  id            String               @id @default(uuid())
+  lastMessage   Message?             @relation("LastMessage", fields: [lastMessageId], references: [id])
+  lastMessageId String?              @unique // foreign key to Message
+  updatedAt     DateTime             @updatedAt
+
+  participants  ThreadParticipant[]  // many-to-many relation
+  messages      Message[]            // thread messages
+}
+
+
+model ThreadParticipant {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  thread    Thread   @relation(fields: [threadId], references: [id])
+
+  userId    String
+  threadId  String
+
+  @@unique([userId, threadId]) // Prevent duplicate entries
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  content     String
+  messageType String   // e.g. 'text', 'image'
+  sender      User     @relation(fields: [senderId], references: [id])
+  senderId    String
+
+  thread      Thread   @relation(fields: [threadId], references: [id])
+  threadId    String
+
+  createdAt   DateTime @default(now())
+
+  // This line allows a message to be set as the `lastMessage` of a thread
+  Thread      Thread?  @relation("LastMessage")
+}
