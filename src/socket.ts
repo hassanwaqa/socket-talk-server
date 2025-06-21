@@ -27,7 +27,7 @@ export function registerSocketHandlers(socket: Socket, io: Server) {
           },
         });
 
-      case 'users':
+      case 'new_users':
         try {
           const users = await prisma.user.findMany({
             select: {
@@ -40,9 +40,10 @@ export function registerSocketHandlers(socket: Socket, io: Server) {
           console.log('users', users)
 
           return socket.emit('message', {
-            event: 'users',
+            event: 'new_users',
             requestId,
             statusCode: 200,
+            success: true,
             payload: {
               data: users,
               count: users.length,
@@ -54,6 +55,7 @@ export function registerSocketHandlers(socket: Socket, io: Server) {
             event: 'users',
             requestId,
             statusCode: 500,
+            success: false,
             error: 'Internal Server Error',
           });
         }
