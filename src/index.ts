@@ -3,7 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { config } from 'dotenv';
-import { registerSocketHandlers } from './socket';
+import { registerSocketHandlers } from './socket/socket';
 
 config(); // Load .env
 

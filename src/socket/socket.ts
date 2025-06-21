@@ -1,10 +1,11 @@
 import { Server, Socket } from 'socket.io';
-import { prisma } from './prisma';
+import { getNewUsers } from './utils';
 
 export function registerSocketHandlers(socket: Socket, io: Server) {
   socket.on('message', async (data) => {
     console.log('data', data);
     const { event, requestId, Authorization, payload } = data;
+    const { query } = payload
 
     // if (!Authorization || !Authorization.startsWith('Bearer')) {
     //   return socket.emit('message', {
@@ -28,37 +29,7 @@ export function registerSocketHandlers(socket: Socket, io: Server) {
         });
 
       case 'new_users':
-        try {
-          const users = await prisma.user.findMany({
-            select: {
-              id: true,
-              email: true,
-              name: true,
-            },
-          });
-
-          console.log('users', users)
-
-          return socket.emit('message', {
-            event: 'new_users',
-            requestId,
-            statusCode: 200,
-            success: true,
-            payload: {
-              data: users,
-              count: users.length,
-            },
-          });
-        } catch (err) {
-          console.error('[users] Failed to fetch users:', err);
-          return socket.emit('message', {
-            event: 'users',
-            requestId,
-            statusCode: 500,
-            success: false,
-            error: 'Internal Server Error',
-          });
-        }
+        return getNewUsers({socket, requestId, userId: query?.userId})
 
       // Add more cases here
     }
