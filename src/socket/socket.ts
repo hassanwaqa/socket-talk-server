@@ -1,11 +1,11 @@
 import { Server, Socket } from 'socket.io';
-import { getNewUsers } from './utils';
+import { createNewThread, getNewUsers, getThreads } from './utils';
 
 export function registerSocketHandlers(socket: Socket, io: Server) {
   socket.on('message', async (data) => {
     console.log('data', data);
     const { event, requestId, Authorization, payload } = data;
-    const { query } = payload
+    const { query, params } = payload
 
     // if (!Authorization || !Authorization.startsWith('Bearer')) {
     //   return socket.emit('message', {
@@ -17,19 +17,15 @@ export function registerSocketHandlers(socket: Socket, io: Server) {
     // }
 
     switch (event) {
-      case 'threads':
-        return socket.emit('message', {
-          event: 'threads',
-          requestId,
-          statusCode: 200,
-          payload: {
-            data: [{ id: 1, name: 'Dummy Thread' }],
-            count: 1,
-          },
-        });
+
+      case "threads":
+        return getThreads({socket, requestId, userId: query?.userId})
 
       case 'new_users':
         return getNewUsers({socket, requestId, userId: query?.userId})
+      
+      case "new_thread":
+        return createNewThread({socket, requestId, participants: params?.participants, userId: query?.userId })
 
       // Add more cases here
     }
