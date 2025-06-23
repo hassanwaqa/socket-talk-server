@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { createNewThread, getNewUsers, getThreads } from './utils';
+import { createNewThread, getNewUsers, getThreads, sendMessage, getThreadMessagesAndJoinRoom } from './utils';
 
 export function registerSocketHandlers(socket: Socket, io: Server) {
   socket.on('message', async (data) => {
@@ -19,21 +19,34 @@ export function registerSocketHandlers(socket: Socket, io: Server) {
     switch (event) {
 
       case "threads":
-        return getThreads({socket, requestId, userId: query?.userId})
+        return getThreads({ socket, requestId, userId: query?.userId })
 
       case 'new_users':
-        return getNewUsers({socket, requestId, userId: query?.userId})
-      
+        return getNewUsers({ socket, requestId, userId: query?.userId })
+
       case "new_thread":
-        return createNewThread({socket, requestId, participants: params?.participants, userId: query?.userId })
+        return createNewThread({ socket, requestId, participants: params?.participants, userId: query?.userId })
+
+      case "send_message":
+        return sendMessage({
+          socket,
+          io,
+          requestId,
+          threadId: params?.threadId,
+          senderId: query?.userId,
+          content: params?.content,
+          messageType: params?.messageType || 'text',
+        });
+
+      case "thread_messages":
+        return getThreadMessagesAndJoinRoom({
+          socket,
+          requestId,
+          threadId: query?.threadId
+        });
 
       // Add more cases here
     }
-  });
-
-  socket.on('join-thread', (threadId) => {
-    socket.join(threadId);
-    console.log(`[${socket.id}] joined thread ${threadId}`);
   });
 
   socket.on('disconnect', () => {

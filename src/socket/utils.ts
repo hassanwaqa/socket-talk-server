@@ -1,4 +1,4 @@
-import { Socket } from "socket.io";
+import { Server, Socket } from "socket.io";
 import { prisma } from "../prisma";
 
 export const getNewUsers = async ({
@@ -212,6 +212,108 @@ export const createNewThread = async ({
       statusCode: 500,
       success: false,
       error: "Internal Server Error",
+    });
+  }
+};
+
+export const sendMessage = async ({
+  socket,
+  io,
+  requestId,
+  threadId,
+  senderId,
+  content,
+  messageType = 'text',
+}: {
+  socket: Socket;
+  io: Server;
+  requestId: string;
+  threadId: string;
+  senderId: string;
+  content: string;
+  messageType?: string;
+}) => {
+  try {
+    // 1. Create the message
+    const message = await prisma.message.create({
+      data: {
+        content,
+        messageType,
+        senderId,
+        threadId,
+      },
+      include: {
+        sender: {
+          select: { id: true, name: true, email: true, image: true },
+        },
+      },
+    });
+
+    // 2. Update thread's lastMessage
+    await prisma.thread.update({
+      where: { id: threadId },
+      data: { lastMessageId: message.id },
+    });
+
+    // 3. Emit the message to all users in the thread
+    io.to(threadId).emit('message', {
+      event: 'new_message',
+      requestId,
+      statusCode: 201,
+      success: true,
+      payload: { message },
+    });
+  } catch (err) {
+    console.error('[sendMessage] Failed to send message:', err);
+    return socket.emit('message', {
+      event: 'new_message',
+      requestId,
+      statusCode: 500,
+      success: false,
+      error: 'Internal Server Error',
+    });
+  }
+};
+
+
+export const getThreadMessagesAndJoinRoom = async ({
+  socket,
+  requestId,
+  threadId
+}: {
+  socket: Socket;
+  requestId: string;
+  threadId: string;
+}) => {
+  try {
+    // 1. Join the thread room
+    socket.join(threadId);
+
+    // 2. Fetch all messages for the thread
+    const messages = await prisma.message.findMany({
+      where: { threadId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        sender: { select: { id: true, name: true, email: true, image: true } }
+      }
+    });
+
+    // 3. Emit messages back to the user
+    return socket.emit('message', {
+      event: 'thread_messages',
+      requestId,
+      statusCode: 200,
+      success: true,
+      payload: { messages }
+    });
+  } catch (err) {
+    console.error('[thread_messages] Failed:', err);
+    return socket.emit('message', {
+      event: 'thread_messages',
+      requestId,
+      statusCode: 500,
+      success: false,
+      error: 'Internal Server Error'
     });
   }
 };
