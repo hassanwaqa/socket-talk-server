@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "redis:up": "docker-compose up -d redis",
+    "redis:down": "docker-compose down",
+    "redis:logs": "docker-compose logs -f redis",
+    "redis:ui": "docker-compose up -d redis-commander",
+    "dev:full": "docker-compose up -d && npm run dev"
   },
   "keywords": [
     "socket.io",

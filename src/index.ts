@@ -18,6 +18,9 @@ const server = http.createServer(app);
 const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
 const subClient = pubClient.duplicate();
 
+// Create a separate Redis client for database operations
+const dbClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+
 // Create Socket.IO server
 const io = new Server(server, {
   cors: {
@@ -34,7 +37,7 @@ app.use(express.json());
 // Basic route
 app.get('/', (req, res) => {
   res.json({
-    message: 'Socket.IO Chat Server with Redis is running!',
+    message: 'Socket.IO Chat Server with Redis Database is running!',
     timestamp: new Date().toISOString()
   });
 });
@@ -45,19 +48,90 @@ const userSessions = new Map<string, { username: string; roomId?: string }>();
 // Store room participants: roomId -> Set<username>
 const roomParticipants = new Map<string, Set<string>>();
 
-// Initialize Redis adapter
+// Message interface for Redis storage
+interface StoredMessage {
+  id: string;
+  username: string;
+  content: string;
+  timestamp: string;
+  roomId: string;
+}
+
+// Initialize Redis connections
 async function initializeRedis() {
   try {
-    await pubClient.connect();
-    await subClient.connect();
+    // Connect all Redis clients
+    await Promise.all([
+      pubClient.connect(),
+      subClient.connect(),
+      dbClient.connect()
+    ]);
 
     // Set up Redis adapter for Socket.IO
     io.adapter(createAdapter(pubClient, subClient));
 
-    console.log('✅ Redis adapter initialized successfully');
+    console.log('✅ Redis adapter and database initialized successfully');
   } catch (error) {
     console.error('❌ Redis connection failed:', error);
-    console.log('⚠️  Running without Redis adapter (single instance mode)');
+    console.log('⚠️  Running without Redis (single instance mode, no message persistence)');
+  }
+}
+
+// Store message in Redis
+async function storeMessage(message: StoredMessage): Promise<void> {
+  try {
+    if (!dbClient.isOpen) {
+      console.log('⚠️  Redis not connected, message not stored');
+      return;
+    }
+
+    // Store message in a list for the room (simpler approach)
+    const messageKey = `room:${message.roomId}:messages`;
+    const messageData = JSON.stringify(message);
+
+    // Use list to store messages in order
+    await dbClient.lPush(messageKey, messageData);
+
+    // Keep only the last 1000 messages per room
+    await dbClient.lTrim(messageKey, 0, 999);
+
+    // Optional: Set expiration for room messages (e.g., 30 days)
+    await dbClient.expire(messageKey, 30 * 24 * 60 * 60); // 30 days
+
+    console.log(`💾 Message stored in Redis for room ${message.roomId}`);
+  } catch (error) {
+    console.error('❌ Error storing message in Redis:', error);
+  }
+}
+
+// Retrieve messages from Redis for a room
+async function getRoomMessages(roomId: string, limit: number = 100): Promise<StoredMessage[]> {
+  try {
+    if (!dbClient.isOpen) {
+      console.log('⚠️  Redis not connected, returning empty message history');
+      return [];
+    }
+
+    const messageKey = `room:${roomId}:messages`;
+
+    // Get messages from list (newest first, so we reverse for chronological order)
+    const messages = await dbClient.lRange(messageKey, 0, limit - 1);
+
+    const parsedMessages: StoredMessage[] = messages.reverse().map(messageData => {
+      try {
+        return JSON.parse(messageData);
+      } catch (error) {
+        console.error('❌ Error parsing message from Redis:', error);
+        return null;
+      }
+    }).filter(msg => msg !== null) as StoredMessage[];
+
+    console.log(`📚 Retrieved ${parsedMessages.length} messages for room ${roomId}`);
+    return parsedMessages;
+
+  } catch (error) {
+    console.error('❌ Error retrieving messages from Redis:', error);
+    return [];
   }
 }
 
@@ -92,6 +166,29 @@ io.on('connection', (socket) => {
       }
       roomParticipants.get(roomId)!.add(username);
 
+      // Retrieve and send message history to the user
+      const messageHistory = await getRoomMessages(roomId);
+
+      // Send message history to the user who just joined
+      if (messageHistory.length > 0) {
+        console.log(`📤 Sending ${messageHistory.length} historical messages to ${username}`);
+
+        // Convert stored messages to frontend format
+        const formattedMessages = messageHistory.map(msg => ({
+          id: msg.id,
+          username: msg.username,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          isOwn: msg.username === username // Mark user's own messages
+        }));
+
+        // Send all messages at once
+        socket.emit('message-history', {
+          roomId: roomId,
+          messages: formattedMessages
+        });
+      }
+
       // Notify others in the room that user joined
       socket.to(roomId).emit('user-joined', { username });
 
@@ -124,6 +221,17 @@ io.on('connection', (socket) => {
         timestamp: message.timestamp || new Date().toISOString(),
         isOwn: false // Will be set to true by the sender's client
       };
+
+      // Store message in Redis database
+      const storedMessage: StoredMessage = {
+        id: messageWithId.id,
+        username: messageWithId.username,
+        content: messageWithId.content,
+        timestamp: messageWithId.timestamp,
+        roomId: roomId
+      };
+
+      await storeMessage(storedMessage);
 
       console.log(`📨 Message from ${message.username} in room ${roomId}: ${message.content}`);
 
@@ -206,6 +314,27 @@ io.on('connection', (socket) => {
       participants: participants ? Array.from(participants) : []
     });
   });
+
+  // Handle clearing room messages (optional utility for testing)
+  socket.on('clear-room-messages', async (data: { roomId: string }) => {
+    try {
+      if (!dbClient.isOpen) {
+        socket.emit('error', { message: 'Redis not connected' });
+        return;
+      }
+
+      const { roomId } = data;
+      const messageKey = `room:${roomId}:messages`;
+
+      await dbClient.del(messageKey);
+      console.log(`🗑️  Cleared messages for room ${roomId}`);
+
+      socket.emit('room-messages-cleared', { roomId });
+    } catch (error) {
+      console.error('❌ Error clearing room messages:', error);
+      socket.emit('error', { message: 'Failed to clear messages' });
+    }
+  });
 });
 
 // Start server
@@ -218,8 +347,26 @@ async function startServer() {
   // Start the server
   server.listen(PORT, () => {
     console.log(`🚀 Socket.IO server running on http://localhost:${PORT}`);
-    console.log(`📡 Ready to accept connections with Redis scaling...`);
+    console.log(`📡 Ready to accept connections with Redis database...`);
   });
 }
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n🛑 Shutting down server...');
+
+  try {
+    await Promise.all([
+      pubClient.quit(),
+      subClient.quit(),
+      dbClient.quit()
+    ]);
+    console.log('✅ Redis connections closed');
+  } catch (error) {
+    console.error('❌ Error closing Redis connections:', error);
+  }
+
+  process.exit(0);
+});
 
 startServer().catch(console.error); 
