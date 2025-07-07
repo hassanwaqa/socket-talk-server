@@ -15,11 +15,26 @@ const app = express();
 const server = http.createServer(app);
 
 // Create Redis clients for Socket.IO adapter
-const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+const pubClient = createClient({
+  username: process.env.REDIS_USERNAME || '',
+  password: process.env.REDIS_PASSWORD || '',
+  socket: {
+    host: process.env.REDIS_HOST,
+    port: Number(process.env.REDIS_PORT)
+  }
+});
 const subClient = pubClient.duplicate();
 
 // Create a separate Redis client for database operations
-const dbClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+// const dbClient = createClient({ url: 'redis://localhost:6379' }); 
+const dbClient = createClient({
+  username: process.env.REDIS_USERNAME || '',
+  password: process.env.REDIS_PASSWORD || '',
+  socket: {
+    host: process.env.REDIS_HOST, 
+    port: Number(process.env.REDIS_PORT)
+  }
+}); 
 
 // Create Socket.IO server
 const io = new Server(server, {
