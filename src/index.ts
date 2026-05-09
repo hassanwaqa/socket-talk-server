@@ -10,31 +10,48 @@ import { v4 as uuidv4 } from 'uuid';
 // Load environment variables
 config();
 
+const redisHost = process.env.REDIS_HOST || 'localhost';
+const redisPort = Number(process.env.REDIS_PORT || 6379);
+const redisTls = process.env.REDIS_TLS === 'true';
+const redisUrl = process.env.REDIS_URL;
+const redisUsername = process.env.REDIS_USERNAME || undefined;
+const redisPassword = process.env.REDIS_PASSWORD || undefined;
+
+function createRedisOptions() {
+  if (redisUrl) {
+    return {
+      url: redisUrl,
+      socket: {
+        tls: redisUrl.startsWith('rediss://') || redisTls
+      }
+    };
+  }
+
+  return {
+    username: redisUsername,
+    password: redisPassword,
+    socket: {
+      host: redisHost,
+      port: redisPort,
+      tls: redisTls
+    }
+  };
+}
+
 // Create Express app
 const app = express();
 const server = http.createServer(app);
 
 // Create Redis clients for Socket.IO adapter
-const pubClient = createClient({
-  username: process.env.REDIS_USERNAME || '',
-  password: process.env.REDIS_PASSWORD || '',
-  socket: {
-    host: process.env.REDIS_HOST,
-    port: Number(process.env.REDIS_PORT)
-  }
-});
+const pubClient = createClient(createRedisOptions());
 const subClient = pubClient.duplicate();
 
 // Create a separate Redis client for database operations
-// const dbClient = createClient({ url: 'redis://localhost:6379' }); 
-const dbClient = createClient({
-  username: process.env.REDIS_USERNAME || '',
-  password: process.env.REDIS_PASSWORD || '',
-  socket: {
-    host: process.env.REDIS_HOST, 
-    port: Number(process.env.REDIS_PORT)
-  }
-}); 
+const dbClient = createClient(createRedisOptions());
+
+pubClient.on('error', (error) => console.error('❌ Redis pub client error:', error.message));
+subClient.on('error', (error) => console.error('❌ Redis sub client error:', error.message));
+dbClient.on('error', (error) => console.error('❌ Redis db client error:', error.message));
 
 // Create Socket.IO server
 const io = new Server(server, {
@@ -75,6 +92,9 @@ interface StoredMessage {
 // Initialize Redis connections
 async function initializeRedis() {
   try {
+    const redisTarget = redisUrl ? redisUrl.replace(/\/\/.*@/, '//***@') : `${redisHost}:${redisPort}`;
+    console.log(`🔌 Connecting to Redis at ${redisTarget} (TLS: ${redisTls ? 'enabled' : 'disabled'})`);
+
     // Connect all Redis clients
     await Promise.all([
       pubClient.connect(),
@@ -384,4 +404,4 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-startServer().catch(console.error); 
+startServer().catch(console.error);

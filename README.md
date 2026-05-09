@@ -33,7 +33,14 @@ Create a `.env` file in the root directory:
 ```env
 PORT=4000
 NODE_ENV=development
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_TLS=false
+REDIS_USERNAME=
+REDIS_PASSWORD=
 ```
+
+For Redis Cloud, use the public endpoint hostname for `REDIS_HOST`, the endpoint port for `REDIS_PORT`, and set `REDIS_TLS=true` only if TLS is enabled for that database.
 
 ## 🌐 API Endpoints
 
